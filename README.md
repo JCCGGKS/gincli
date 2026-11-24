@@ -48,7 +48,7 @@ options：
 ## 脚本做了什么
 
 1. 用 `curl`（或 `wget`）从 `https://codeload.github.com/<repo>/tar.gz/<ref>` 下载模板归档。
-2. 解压、去掉归档顶层目录，用 `cp -a` 保留权限位复制到暂存目录。
+2. 解压、去掉归档顶层目录，用 `cp -a` 保留权限位复制到暂存目录。骨架自带的 `README.md` 和 `.gitignore` 不沿用：`.gitignore` 总是重新生成，README 仅在目标目录没有时新建（已有则保留）。
 3. 用 `perl` 单次扫描替换占位符（插入的值不会被再次替换）：
 
    | 占位符 | Go 文件 | go.mod | 其它文本文件 |
@@ -58,6 +58,6 @@ options：
    | `ginctl` | 服务名 | — | 服务名 |
 
    `gin_scaffold`（数据库名）**不替换**，留给你在配置里自己定义。`go.sum` 和二进制文件保持不变。
-4. 可选执行 `git init` + `git add -A` 和 `go build ./...`（构建失败只告警）；最后把暂存目录移动到目标路径，失败时自动清理暂存目录。
+4. 可选执行 `git init`（只建空仓库，**不会** `git add` / `commit` / `push`，这些交给使用者自己决定）和 `go build ./...`（构建失败只告警）；最后把暂存目录移动到目标路径，失败时自动清理暂存目录。
 
 依赖：bash、curl 或 wget、tar、perl、grep、find；git 和 go 可选。

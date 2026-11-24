@@ -130,6 +130,9 @@ PROJECT="$STAGE/project"
 mkdir -p "$PROJECT"
 cp -a "$SRC_ROOT/." "$PROJECT/"   # -a 保留权限位
 
+# 不用骨架自带的 README 与 .gitignore，稍后按需生成新的。
+rm -f "$PROJECT/README.md" "$PROJECT/.gitignore"
+
 log_info "rewriting module=$MODULE service=$SERVICE"
 
 # 单次扫描替换，插入的值不会被二次扫描（避免 ginctl 碰撞）。
@@ -167,11 +170,73 @@ while IFS= read -r -d '' file; do
   rewrite_file "$file" "$kind"
 done < <(find "$PROJECT" -type f -print0)
 
+# .gitignore 始终生成新的，不使用骨架项目原有的。
+cat > "$PROJECT/.gitignore" <<'EOF'
+# Go binaries
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+/bin/
+
+# Test binaries and coverage
+*.test
+*.out
+coverage.*
+*.coverprofile
+
+# Go workspace
+go.work
+go.work.sum
+
+# Dependencies
+vendor/
+
+# Local config and secrets
+.env
+etc/config_local.yaml
+
+# Runtime data
+logs/
+
+# Editors
+.idea/
+.vscode/
+EOF
+
+# README 只在目标目录没有时才生成，避免覆盖已有文档。
+if [[ "$KEEP_GIT" -eq 1 && -f "$TARGET/README.md" ]]; then
+  log_info "keeping existing README.md in $TARGET"
+else
+  cat > "$PROJECT/README.md" <<'EOF'
+# __SERVICE__
+
+A Gin service built from the [ginctl2](https://github.com/JCCGGKS/ginctl2) skeleton.
+
+- Module: `__MODULE__`
+- Service: `__SERVICE__`
+
+## Run
+
+1. Set `mysql.database` in `etc/config_<env>.yaml` (the skeleton ships a
+   `gin_scaffold` placeholder — replace it with your own database name).
+2. Create the schema:
+   `mysql -u app -p <db> < migrations/001_create_users.sql`
+3. Start the service:
+   `go run .` (defaults to `etc/config_dev.yaml`)
+   `go run . -f etc/config_test.yaml`
+   `go run . -f etc/config_prod.yaml` (requires `AUTH_JWTSECRET`)
+
+Redis is optional: the service starts with a warning when Redis is unavailable.
+EOF
+  sed -i "s|__MODULE__|$MODULE|g; s|__SERVICE__|$SERVICE|g" "$PROJECT/README.md"
+fi
+
 if [[ "$GIT_INIT" -eq 1 && "$KEEP_GIT" -eq 0 ]]; then
   command -v git >/dev/null 2>&1 || die "git is required (use --no-git to skip)"
   git init -q -b master "$PROJECT" 2>/dev/null || git init -q "$PROJECT"
-  git -C "$PROJECT" add -A
-  log_ok "initialized Git repository"
+  log_ok "initialized Git repository (no files staged)"
 fi
 
 if [[ "$DO_BUILD" -eq 1 ]] && command -v go >/dev/null 2>&1; then
@@ -185,10 +250,7 @@ fi
 if [[ "$KEEP_GIT" -eq 1 ]]; then
   # 合并进已有仓库，保留 .git 与 remote，不清空用户已有文件。
   cp -a "$PROJECT/." "$TARGET/"
-  if [[ "$GIT_INIT" -eq 1 ]]; then
-    git -C "$TARGET" add -A
-    log_ok "staged generated files in existing Git repository"
-  fi
+  log_ok "merged files into existing Git repository (nothing staged)"
 else
   if [[ -d "$TARGET" ]]; then
     rmdir "$TARGET" 2>/dev/null || die "cannot replace target directory: $TARGET"
@@ -200,6 +262,6 @@ log_ok "project created: $TARGET"
 printf '  module:   %s\n  service:  %s\n  template: %s@%s\n' \
   "$MODULE" "$SERVICE" "$REPO" "$REF"
 printf '\nNext steps:\n  cd %s\n  set mysql.database in etc/config_<env>.yaml\n  edit migrations/ and README.md\n  go run .\n' "$TARGET"
-if [[ "$KEEP_GIT" -eq 1 && "$GIT_INIT" -eq 1 ]]; then
-  printf '  git commit -m "feat: initialize from ginctl2 skeleton" && git push\n'
+if [[ "$GIT_INIT" -eq 1 ]]; then
+  printf '  git add -A && git commit -m "feat: initialize from ginctl2 skeleton" && git push\n'
 fi
