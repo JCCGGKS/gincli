@@ -4,7 +4,7 @@
 #
 # Usage:
 #   ./init.sh [--repo owner/name] [--ref ref] [--no-git] [--no-build] [--force] \
-#       <target-dir> [module-path] [service-name] [db-name]
+#       <target-dir> [module-path] [service-name]
 #
 # 只有 bash / curl(或 wget) / tar / git / perl / grep / find 这些常见工具依赖。
 
@@ -18,7 +18,7 @@ die()      { printf '\033[0;31m[ERROR]\033[0m %s\n' "$*" >&2; exit 1; }
 usage() {
   cat <<'EOF'
 Usage:
-  ./init.sh [options] <target-dir> [module-path] [service-name] [db-name]
+  ./init.sh [options] <target-dir> [module-path] [service-name]
 
 Options:
   --repo owner/name  模板 GitHub 仓库（默认 JCCGGKS/ginctl2）
@@ -31,11 +31,13 @@ Options:
 Defaults:
   module-path   目标目录名
   service-name  module-path 的最后一段
-  db-name       service-name，'.' 和 '-' 转为 '_' 并小写
+
+Note:
+  Database names are NOT rewritten; set them yourself in etc/config_<env>.yaml.
 
 Example:
   ./init.sh ../order-service
-  ./init.sh ../order-service github.com/acme/order-service order-service order_service
+  ./init.sh ../order-service github.com/acme/order-service order-service
 EOF
 }
 
@@ -61,7 +63,7 @@ while [[ $# -gt 0 ]]; do
 done
 set -- "${ARGS[@]}"
 
-[[ $# -ge 1 && $# -le 4 ]] || { usage; exit 2; }
+[[ $# -ge 1 && $# -le 3 ]] || { usage; exit 2; }
 
 command -v perl >/dev/null 2>&1 || die "perl is required for rewriting"
 command -v tar >/dev/null 2>&1 || die "tar is required"
@@ -73,18 +75,15 @@ TARGET="$TARGET_PARENT/$(basename "$TARGET")"
 
 MODULE=${2:-}
 SERVICE=${3:-}
-DB_NAME=${4:-}
 MODULE=${MODULE%/}
 
 [[ -z "$MODULE" ]] && MODULE=$(basename "$TARGET")
 [[ -z "$SERVICE" ]] && SERVICE=$(basename "$MODULE")
-[[ -z "$DB_NAME" ]] && DB_NAME=$(printf '%s' "$SERVICE" | tr '.-' '__' | tr '[:upper:]' '[:lower:]')
 
 [[ "$REPO" =~ ^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$ ]] || die "invalid repo: $REPO"
 [[ "$REF" =~ ^[A-Za-z0-9][A-Za-z0-9._/-]*$ && "$REF" != *'..'* && "$REF" != *'//'* ]] || die "invalid ref: $REF"
 [[ "$MODULE" =~ ^[A-Za-z0-9][A-Za-z0-9._~/-]*$ && "$MODULE" != *'//'* ]] || die "invalid module path: $MODULE"
 [[ "$SERVICE" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || die "invalid service name: $SERVICE"
-[[ "$DB_NAME" =~ ^[A-Za-z0-9_]+$ ]] || die "invalid database name: $DB_NAME"
 
 if [[ -e "$TARGET" ]]; then
   [[ -d "$TARGET" ]] || die "target exists and is not a directory: $TARGET"
@@ -120,27 +119,26 @@ PROJECT="$STAGE/project"
 mkdir -p "$PROJECT"
 cp -a "$SRC_ROOT/." "$PROJECT/"   # -a 保留权限位
 
-log_info "rewriting module=$MODULE service=$SERVICE db=$DB_NAME"
+log_info "rewriting module=$MODULE service=$SERVICE"
 
-# 单次扫描替换，插入的值不会被二次扫描（避免 ginctl/gin_scaffold 碰撞）。
+# 单次扫描替换，插入的值不会被二次扫描（避免 ginctl 碰撞）。
+# 数据库名不在这里处理，gin_scaffold 占位符保留，由使用者自行配置。
 rewrite_file() {
   local file=$1 kind=$2
-  KIND="$kind" MODULE="$MODULE" SERVICE="$SERVICE" DB_NAME="$DB_NAME" perl -pi -e '
+  KIND="$kind" MODULE="$MODULE" SERVICE="$SERVICE" perl -pi -e '
     BEGIN {
       if ($ENV{KIND} eq "go") {
         %m = ("\"gin-scaffold\"" => "\"$ENV{SERVICE}\"",
               "gin-scaffold"    => $ENV{MODULE},
-              "ginctl"          => $ENV{SERVICE},
-              "gin_scaffold"    => $ENV{DB_NAME});
-        $re = qr/("gin-scaffold"|gin-scaffold|ginctl|gin_scaffold)/;
+              "ginctl"          => $ENV{SERVICE});
+        $re = qr/("gin-scaffold"|gin-scaffold|ginctl)/;
       } elsif ($ENV{KIND} eq "mod") {
         %m = ("gin-scaffold" => $ENV{MODULE});
         $re = qr/(gin-scaffold)/;
       } else {
         %m = ("gin-scaffold" => $ENV{SERVICE},
-              "ginctl"       => $ENV{SERVICE},
-              "gin_scaffold" => $ENV{DB_NAME});
-        $re = qr/(gin-scaffold|ginctl|gin_scaffold)/;
+              "ginctl"       => $ENV{SERVICE});
+        $re = qr/(gin-scaffold|ginctl)/;
       }
     }
     s#$re#$m{$1}#g;
@@ -179,6 +177,6 @@ fi
 mv "$PROJECT" "$TARGET"
 
 log_ok "project created: $TARGET"
-printf '  module:   %s\n  service:  %s\n  database: %s\n  template: %s@%s\n' \
-  "$MODULE" "$SERVICE" "$DB_NAME" "$REPO" "$REF"
-printf '\nNext steps:\n  cd %s\n  edit etc/config_dev.yaml, migrations/ and README.md\n  go run .\n' "$TARGET"
+printf '  module:   %s\n  service:  %s\n  template: %s@%s\n' \
+  "$MODULE" "$SERVICE" "$REPO" "$REF"
+printf '\nNext steps:\n  cd %s\n  set mysql.database in etc/config_<env>.yaml\n  edit migrations/ and README.md\n  go run .\n' "$TARGET"

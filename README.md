@@ -5,7 +5,7 @@ Gin 项目脚手架：一个脚本从 GitHub 拉取 [ginctl2](https://github.com
 ## 用法
 
 ```bash
-./init.sh [options] <target-dir> [module-path] [service-name] [db-name]
+./init.sh [options] <target-dir> [module-path] [service-name]
 ```
 
 options：
@@ -19,22 +19,23 @@ options：
 | `--force` | 目标目录非空时先删除再重建 |
 | `-h, --help` | 显示帮助 |
 
-`module-path`、`service-name`、`db-name` 可省略，从目标目录名推导：
+`module-path`、`service-name` 可省略，从目标目录名推导：
 
 | 参数 | 默认值 |
 |------|--------|
 | module-path | 目标目录名 |
 | service-name | module-path 最后一段 |
-| db-name | service-name 的 `.`/`-` 转为 `_` 并小写 |
+
+**数据库名不在脚本里处理**：模板中的 `gin_scaffold` 占位符会原样保留，请自行在 `etc/config_<env>.yaml` 里设置 `mysql.database`。
 
 示例：
 
 ```bash
-# 全部默认：module=order-svc service=order-svc db=order_svc
+# 全部默认：module=order-svc service=order-svc
 ./init.sh ../order-service
 
 # 显式指定
-./init.sh ../order-service github.com/acme/order-service order-service order_service
+./init.sh ../order-service github.com/acme/order-service order-service
 
 # 离线时跳过构建
 ./init.sh --no-build ../order-service
@@ -51,9 +52,8 @@ options：
    | `"gin-scaffold"` | 服务名（独立 ClientName） | — | — |
    | `gin-scaffold` | Go module 路径 | Go module 路径 | 服务名 |
    | `ginctl` | 服务名 | — | 服务名 |
-   | `gin_scaffold` | 数据库名 | — | 数据库名 |
 
-   `go.sum` 和二进制文件保持不变。
+   `gin_scaffold`（数据库名）**不替换**，留给你在配置里自己定义。`go.sum` 和二进制文件保持不变。
 4. 可选执行 `git init` + `git add -A` 和 `go build ./...`（构建失败只告警）；最后把暂存目录移动到目标路径，失败时自动清理暂存目录。
 
 依赖：bash、curl 或 wget、tar、perl、grep、find；git 和 go 可选。
