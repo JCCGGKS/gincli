@@ -3,8 +3,8 @@
 # 从 GitHub 拉取 Gin 骨架（ginctl2），替换占位符并初始化一个新项目。
 #
 # Usage:
-#   ./init.sh [--repo owner/name] [--ref ref] [--no-git] [--no-build] [--force] \
-#       <target-dir> [module-path] [service-name]
+#   ./init.sh [--repo owner/name] [--ref ref] [--no-git] [--no-build] \
+#       [--force | --keep-git] <target-dir> [module-path] [service-name]
 #
 # 只有 bash / curl(或 wget) / tar / git / perl / grep / find 这些常见工具依赖。
 
@@ -26,6 +26,7 @@ Options:
   --no-git           不初始化 Git 仓库
   --no-build         不执行 go build ./...
   --force            目标目录非空时先删除再重建
+  --keep-git         目标已是 Git 仓库时保留 .git/remote，只覆盖工作区文件
   -h, --help         显示帮助
 
 Defaults:
@@ -46,6 +47,7 @@ REF='master'
 GIT_INIT=1
 DO_BUILD=1
 FORCE=0
+KEEP_GIT=0
 ARGS=()
 
 while [[ $# -gt 0 ]]; do
@@ -55,6 +57,7 @@ while [[ $# -gt 0 ]]; do
     --no-git) GIT_INIT=0; shift ;;
     --no-build) DO_BUILD=0; shift ;;
     --force) FORCE=1; shift ;;
+    --keep-git) KEEP_GIT=1; shift ;;
     -h|--help) usage; exit 0 ;;
     --) shift; ARGS+=("$@"); break ;;
     -*) die "unknown option: $1" ;;
@@ -80,6 +83,9 @@ MODULE=${MODULE%/}
 [[ -z "$MODULE" ]] && MODULE=$(basename "$TARGET")
 [[ -z "$SERVICE" ]] && SERVICE=$(basename "$MODULE")
 
+[[ "$FORCE" -eq 0 || "$KEEP_GIT" -eq 0 ]] || die "--force and --keep-git cannot be used together"
+[[ "$KEEP_GIT" -eq 0 || -d "$TARGET/.git" ]] || die "--keep-git requires an existing Git repository at $TARGET"
+
 [[ "$REPO" =~ ^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$ ]] || die "invalid repo: $REPO"
 [[ "$REF" =~ ^[A-Za-z0-9][A-Za-z0-9._/-]*$ && "$REF" != *'..'* && "$REF" != *'//'* ]] || die "invalid ref: $REF"
 [[ "$MODULE" =~ ^[A-Za-z0-9][A-Za-z0-9._~/-]*$ && "$MODULE" != *'//'* ]] || die "invalid module path: $MODULE"
@@ -88,9 +94,14 @@ MODULE=${MODULE%/}
 if [[ -e "$TARGET" ]]; then
   [[ -d "$TARGET" ]] || die "target exists and is not a directory: $TARGET"
   if [[ -n "$(find "$TARGET" -mindepth 1 -maxdepth 1 -print -quit)" ]]; then
-    [[ "$FORCE" -eq 1 ]] || die "target directory is not empty: $TARGET (use --force to replace it)"
-    log_warn "--force: removing existing directory $TARGET"
-    rm -rf "$TARGET"
+    if [[ "$FORCE" -eq 1 ]]; then
+      log_warn "--force: removing existing directory $TARGET"
+      rm -rf "$TARGET"
+    elif [[ "$KEEP_GIT" -eq 1 ]]; then
+      log_info "keeping existing Git repository at $TARGET"
+    else
+      die "target directory is not empty: $TARGET (use --force to replace it, or --keep-git to fill an existing repo)"
+    fi
   fi
 fi
 
@@ -156,7 +167,7 @@ while IFS= read -r -d '' file; do
   rewrite_file "$file" "$kind"
 done < <(find "$PROJECT" -type f -print0)
 
-if [[ "$GIT_INIT" -eq 1 ]]; then
+if [[ "$GIT_INIT" -eq 1 && "$KEEP_GIT" -eq 0 ]]; then
   command -v git >/dev/null 2>&1 || die "git is required (use --no-git to skip)"
   git init -q -b master "$PROJECT" 2>/dev/null || git init -q "$PROJECT"
   git -C "$PROJECT" add -A
@@ -171,12 +182,24 @@ if [[ "$DO_BUILD" -eq 1 ]] && command -v go >/dev/null 2>&1; then
   fi
 fi
 
-if [[ -d "$TARGET" ]]; then
-  rmdir "$TARGET" 2>/dev/null || die "cannot replace target directory: $TARGET"
+if [[ "$KEEP_GIT" -eq 1 ]]; then
+  # 合并进已有仓库，保留 .git 与 remote，不清空用户已有文件。
+  cp -a "$PROJECT/." "$TARGET/"
+  if [[ "$GIT_INIT" -eq 1 ]]; then
+    git -C "$TARGET" add -A
+    log_ok "staged generated files in existing Git repository"
+  fi
+else
+  if [[ -d "$TARGET" ]]; then
+    rmdir "$TARGET" 2>/dev/null || die "cannot replace target directory: $TARGET"
+  fi
+  mv "$PROJECT" "$TARGET"
 fi
-mv "$PROJECT" "$TARGET"
 
 log_ok "project created: $TARGET"
 printf '  module:   %s\n  service:  %s\n  template: %s@%s\n' \
   "$MODULE" "$SERVICE" "$REPO" "$REF"
 printf '\nNext steps:\n  cd %s\n  set mysql.database in etc/config_<env>.yaml\n  edit migrations/ and README.md\n  go run .\n' "$TARGET"
+if [[ "$KEEP_GIT" -eq 1 && "$GIT_INIT" -eq 1 ]]; then
+  printf '  git commit -m "feat: initialize from ginctl2 skeleton" && git push\n'
+fi

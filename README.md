@@ -16,7 +16,8 @@ options：
 | `--ref ref` | 分支 / 标签 / 提交（默认 `master`） |
 | `--no-git` | 不初始化 Git 仓库 |
 | `--no-build` | 不执行 `go build ./...` |
-| `--force` | 目标目录非空时先删除再重建 |
+| `--force` | 目标目录非空时先删除再重建（会删掉 `.git`，慎用） |
+| `--keep-git` | 目标已是 Git 仓库时保留 `.git`/remote，只把生成文件合并进去 |
 | `-h, --help` | 显示帮助 |
 
 `module-path`、`service-name` 可省略，从目标目录名推导：
@@ -39,6 +40,9 @@ options：
 
 # 离线时跳过构建
 ./init.sh --no-build ../order-service
+
+# 目标是从 GitHub 克隆下来的已有仓库：保留 .git 和 remote
+./init.sh --keep-git ../llmgateway
 ```
 
 ## 脚本做了什么
